@@ -1,13 +1,6 @@
 
-global settingsdict, geneticdict
-
-#print("FileSettings found")
+global settingsdict
 
 
-settingsdict = {'nodes_info': "nodes_info_EDGE1.csv", 'links_info': "links_info_EDGE1.csv", 'multiprocessors': 300}
+settingsdict = {'nodes_info': "nodes_info_EDGE2.csv", 'links_info': "links_info_EDGE2.csv", 'multiprocessors': 2}
 
-
-#settingsdict = {'inputfilename': "SV_Moderate.inp", 'root': "O14", 'multiprocessors': 4}
-
-
-#settingsdict = {'inputfilename': "001_Brentwood_1D_Existing_Monitoring_rev1.inp", 'root': "BW1", 'multiprocessors': 20}

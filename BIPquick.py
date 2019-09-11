@@ -13,7 +13,7 @@ def main():
     The main function puts the tools from the other sections together into a cogent workflow
     """
     global nodes, links, visit_network_mask, visited_flag, subnetwork_container_nodes, subnetwork_container_links, \
-        processors, counter, partition_boolean, partition_threshold, nrows
+        processors, counter, partition_boolean, partition_threshold, nrows, lrows
     # The .csv files containing link-node information abstracted from the SWMM file are opened and parsed into the nodes
     # and links array.  The starting point for the phantom node/link's names (should they be necessary) is determined.
     nodes_info = FileSettings.settingsdict['nodes_info']
@@ -56,6 +56,7 @@ def main():
         # Determine the new cumulative weight for each node for a given network
         nr_totalweight_assigner()
         print(nodes[:, nr_directweight_u])
+        print(nodes[:, nr_totalweight_u])
         partition_threshold = max_weight / (processors - processors_counter)
 
         # The effective_root is the root where the partition_threshold is found exactly.  Alternatively, if the
@@ -76,27 +77,64 @@ def main():
             # the link that the partition_threshold must exit, and put a phantom node there.  This also has the effect
             # of shortening the spanning link to upstream of the phantom node, and creating a phantom link to connect
             # the phantom node to the rest of the network.
-            if spanning_link != '':
-                length_from_start = linear_interpolator(partition_threshold, spanning_link)
-                phantom_node_generator(spanning_link, length_from_start, i)
-                # Also, separate out the upstream subnetwork from the phantom node, and add it to the nodes container.
-                #print("Entering subnetwork_carving()")
-                subnetwork_carving(nodes[phantom_array_loc, ni_idx], i)
-                #print(subnetwork_container_nodes)
-                print(visit_network_mask)
-                #quit()
-            else:
+            while spanning_link == '':
                 print('Not Ideal and Not Spanned after ' + str(i) + ' partitions.')
-                break
-        for row in range(len(nodes)):
-            if nodes[row, ni_idx] in subnetwork_container_nodes[i, :, ni_idx]:
+                """
+                effective_root - the nearest overestimate of the partition threshold
+                Process:
+                - add the effective_root to the nodes container but don't turn off its visited flag
+                - find an upstream neighbor of the effective_root, save the nr_totalweight_u for the upstream neighbor
+                - call subnetwork_carving(upstream_neighbor)
+                - reduce the partition threshold by the nr_totalweight_u from the upstream_neighbor
+                - search for spanning_links again... theres going to have to be a while loop in here somewhere
+                """
+                print("The effective root is: " + effective_root)
+                for nrow in range(len(nodes)):
+                    if nodes[nrow, ni_idx] == effective_root:
+                        subnetwork_container_nodes[i, nrow] = nodes[nrow]
+                        for lrow in range(len(links)):
+                            if links[lrow, li_Mnode_d] == effective_root:
+                                upstream_link = links[lrow, li_idx]
+                                upstream_link_length = links[lrow, lr_Length]
+                                upstream_node = links[lrow, li_Mnode_u]
+                                for nrows2 in range(len(nodes)):
+                                    if nodes[nrows2, ni_idx] == upstream_node:
+                                        upstream_weight = nodes[nrows2, nr_totalweight_u]
+                                        total_clipped_weight = float(upstream_weight) + weighting_function(
+                                            float(upstream_link_length))
+                                        break
+                                break
+                        nodes[nrow, nr_directweight_u] = nodes[nrow, nr_directweight_u] - total_clipped_weight
+                        break
+                partition_threshold = partition_threshold - total_clipped_weight
+                print("The amount of weight removed from the system is: " + str(total_clipped_weight))
+                print("The new partition_threshold is: " + str(partition_threshold))
+                subnetwork_carving(upstream_node, i)
+                spanning_link = spanning_check(partition_threshold)
+                print("The spanning link is:" + spanning_link)
+
+            length_from_start = linear_interpolator(partition_threshold, spanning_link)
+            phantom_node_generator(spanning_link, length_from_start, i)
+            # Also, separate out the upstream subnetwork from the phantom node, and add it to the nodes container.
+            #print("Entering subnetwork_carving()")
+            subnetwork_carving(nodes[phantom_array_loc, ni_idx], i)
+            #print(subnetwork_container_nodes)
+            print(visit_network_mask)
+
+        for row in range(len(visit_network_mask)):
+            # if nodes[row, ni_idx] in subnetwork_container_nodes[i, :, ni_idx]:
+            #     nodes[row, nr_directweight_u] = 0
+            if visit_network_mask[row] is True:
                 nodes[row, nr_directweight_u] = 0
 
-        #print(nodes)
-        #print(links)
+
+        print(nodes)
+        print(links)
 
         # Update the processors_counter, which is used to determine the partition_threshold
         processors_counter = processors_counter + 1
+        #quit()
+
     return
 
 
@@ -713,8 +751,8 @@ def phantom_node_generator(spanning_link, length_from_start, i):
     nodes[phantom_array_loc, nr_totalweight_u] = partition_threshold
 
     # If this partition is not the last one, go ahead and add that node to the next partition also
-    if i != FileSettings.settingsdict['multiprocessors'] - 1:
-        subnetwork_container_nodes[i+1, phantom_array_loc] = nodes[phantom_array_loc]
+    # if i != FileSettings.settingsdict['multiprocessors'] - 1:
+    #     subnetwork_container_nodes[i+1, phantom_array_loc] = nodes[phantom_array_loc]
 
     # This code block is for updating the links array
     for link_row in range(len(links)):
@@ -839,6 +877,8 @@ def reorganize_arrays(nodes_container, links_container):
                 continue
             elif row[ni_idx] in reorganized_nodes[:, ni_idx]:
                 continue
+            elif row[ni_idx] == -998877:
+                continue
             else:
                 reorganized_nodes[nodes_row_counter] = row
                 nodes_row_counter = nodes_row_counter + 1
@@ -852,6 +892,8 @@ def reorganize_arrays(nodes_container, links_container):
             if None in row:
                 continue
             elif row[ni_idx] in reorganized_links[:, ni_idx]:
+                continue
+            elif row[ni_idx] == -998877:
                 continue
             else:
                 reorganized_links[links_row_counter] = row
@@ -868,7 +910,7 @@ def post_processing():
     for i in range(len(subnetwork_container_nodes)):
         nodes_container = subnetwork_container_nodes[i]
         subnetworks_links(nodes_container)
-        populate_last_processor()
+        #populate_last_processor()
     reorganize_arrays(subnetwork_container_nodes, subnetwork_container_links)
     return
 
@@ -877,6 +919,7 @@ def post_processing():
 main()
 print(subnetwork_container_nodes)
 post_processing()
+print(subnetwork_container_links)
 print(nodes)
 print(links)
 
